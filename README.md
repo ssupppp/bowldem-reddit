@@ -28,7 +28,7 @@ A Wordle-style daily cricket puzzle game built on Reddit's Devvit Web platform.
 npm install              # Install dependencies
 npm run build            # Build client + server
 npx devvit upload        # Upload to Reddit
-npx devvit playtest bowldem_dev  # Start playtest
+npx devvit playtest playbowldem_dev  # Start playtest
 ```
 
 ### Project Structure
@@ -40,7 +40,8 @@ src/
 ```
 
 ## Links
-- **Play:** https://www.reddit.com/r/bowldem_dev/?playtest=bowldem
+- **Production:** https://www.reddit.com/r/playbowldem/
+- **Dev/Test:** https://www.reddit.com/r/playbowldem_dev/?playtest=playbowldem
 - **Original Web Version:** https://bowldem.com
 - **Progress:** See [PROGRESS.md](./PROGRESS.md)
 

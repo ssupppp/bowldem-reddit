@@ -37,7 +37,7 @@ src/
 ```bash
 npm run build              # Build client + server
 npx devvit upload          # Upload to Reddit
-npx devvit playtest bowldem_dev  # Start playtest
+npx devvit playtest playbowldem_dev  # Start playtest (app: playbowldem)
 ```
 
 ## API Endpoints
@@ -62,17 +62,30 @@ bowldem:leaderboard:{puzzleDate}     # Daily leaderboard
 ```
 
 ## Current Blocking Issue
-`reddit.submitCustomPost()` fails with obfuscated ValidationErrors. The error shows memory addresses instead of field names. See PROGRESS.md for full debug history.
+`reddit.submitCustomPost()` fails with obfuscated ValidationErrors. The error shows memory addresses instead of field names.
+
+**Root Cause:** SDK makes internal request to `/r//about/moderators` (empty subreddit) - context is lost.
+
+**See:** `todo/DEVVIT_BUGS.md` for full debug history.
 
 ## MCP Integration
-Devvit MCP is available for debugging:
+Devvit MCP is configured (added Jan 31, 2026):
 ```
 claude mcp add devvit -- npx -y @devvit/mcp
 ```
+**Status:** Restart Claude Code to connect.
+
+## Todo Folder
+All progress tracking in `todo/`:
+- `MIGRATION_PLAN.md` - 7-phase plan with status
+- `DAILY_LOG.md` - Session-by-session progress
+- `DEVVIT_BUGS.md` - Bug tracking & research findings
 
 ## Important Links
-- **Playtest:** https://www.reddit.com/r/bowldem_dev/?playtest=bowldem
-- **App Dashboard:** https://developers.reddit.com/apps/bowldem
+- **Production Subreddit:** https://www.reddit.com/r/playbowldem/
+- **Dev/Test Subreddit:** https://www.reddit.com/r/playbowldem_dev/
+- **Playtest URL:** https://www.reddit.com/r/playbowldem_dev/?playtest=playbowldem
+- **App Dashboard:** https://developers.reddit.com/apps/playbowldem
 - **Original Web Version:** https://github.com/ssupppp/bowldem
 - **Devvit Docs:** https://developers.reddit.com/docs
 

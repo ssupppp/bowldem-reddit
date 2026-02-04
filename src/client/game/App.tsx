@@ -31,16 +31,22 @@ export const App = () => {
   const [countdown, setCountdown] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Filter players for autocomplete
+  // Filter players for autocomplete (deduplicated by name, more results)
   const filteredPlayers = useMemo(() => {
-    if (searchQuery.length < 3) return [];
+    if (searchQuery.length < 2) return [];
     const query = searchQuery.toLowerCase();
+    const seenNames = new Set<string>();
     return players
-      .filter(p =>
-        p.fullName.toLowerCase().includes(query) &&
-        !usedPlayerIds.has(p.id)
-      )
-      .slice(0, 6);
+      .filter(p => {
+        if (!p.fullName.toLowerCase().includes(query)) return false;
+        if (usedPlayerIds.has(p.id)) return false;
+        // Deduplicate by name (case-insensitive)
+        const nameLower = p.fullName.toLowerCase();
+        if (seenNames.has(nameLower)) return false;
+        seenNames.add(nameLower);
+        return true;
+      })
+      .slice(0, 12);
   }, [searchQuery, players, usedPlayerIds]);
 
   // Reverse feedback list for newest-first display (memoized)
@@ -92,7 +98,7 @@ export const App = () => {
       return `${p}${t}${r}${m}`;
     }).join('\n');
 
-    return `${header}${streak ? ' ' + streak : ''}\n\n${grid}\n\nhttps://reddit.com/r/bowldem`;
+    return `${header}${streak ? ' ' + streak : ''}\n\n${grid}\n\nhttps://reddit.com/r/playbowldem`;
   }, [puzzleNumber, gameStatus, guessesUsed, maxGuesses, feedbackList, stats]);
 
   // Handle share
@@ -204,7 +210,7 @@ export const App = () => {
 
       {/* Main Content - fills remaining space */}
       <main className="flex-1 px-3 py-3 max-w-lg mx-auto w-full overflow-y-auto">
-        {/* Compact Scorecard - ~80px */}
+        {/* Compact Scorecard - hide team details until won */}
         {puzzle && (
           <div className="bg-white rounded-lg shadow-sm p-3 mb-3">
             <div className="flex items-center justify-center gap-1 text-gray-600 text-sm mb-2">
@@ -213,13 +219,22 @@ export const App = () => {
             </div>
             <div className="flex items-center justify-center gap-3 text-center">
               <div className="flex-1 text-right">
-                <span className="font-semibold text-gray-900">{puzzle.team1Score}</span>
+                <span className="font-semibold text-gray-900">
+                  {gameStatus === 'won' ? puzzle.team1Score : '???'}
+                </span>
               </div>
               <div className="text-gray-400 text-xs">vs</div>
               <div className="flex-1 text-left">
-                <span className="font-semibold text-gray-900">{puzzle.team2Score}</span>
+                <span className="font-semibold text-gray-900">
+                  {gameStatus === 'won' ? puzzle.team2Score : '???'}
+                </span>
               </div>
             </div>
+            {gameStatus === 'won' && (
+              <div className="text-center text-xs text-gray-500 mt-2">
+                T20 World Cup Match
+              </div>
+            )}
           </div>
         )}
 
@@ -238,9 +253,9 @@ export const App = () => {
                 value={searchQuery}
                 onChange={(e) => {
                   setSearchQuery(e.target.value);
-                  setShowSuggestions(e.target.value.length >= 3);
+                  setShowSuggestions(e.target.value.length >= 2);
                 }}
-                onFocus={() => setShowSuggestions(searchQuery.length >= 3)}
+                onFocus={() => setShowSuggestions(searchQuery.length >= 2)}
                 onKeyDown={handleKeyDown}
                 placeholder="Type a player name..."
                 disabled={isSubmitting}
@@ -249,30 +264,32 @@ export const App = () => {
             </div>
 
             {/* Dropdown with backdrop */}
-            {showSuggestions && searchQuery.length >= 3 && (
+            {showSuggestions && searchQuery.length >= 2 && (
               <>
                 {/* Backdrop overlay */}
                 <div
                   className="fixed inset-0 z-10"
                   onClick={handleBackdropClick}
                 />
-                {/* Dropdown */}
-                <div className="absolute z-20 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-[200px] overflow-auto">
+                {/* Dropdown - compact items to show more */}
+                <div className="absolute z-20 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-[280px] overflow-auto">
                   {filteredPlayers.length > 0 ? (
                     filteredPlayers.map((player, index) => (
                       <button
                         key={player.id}
                         onClick={() => handleSelectPlayer(player)}
-                        className={`w-full px-4 py-2.5 text-left border-b border-gray-100 last:border-0 ${
+                        className={`w-full px-3 py-1.5 text-left border-b border-gray-100 last:border-0 ${
                           index === selectedIndex ? 'bg-orange-50' : 'hover:bg-gray-50'
                         }`}
                       >
-                        <div className="font-medium text-gray-900 text-sm">{player.fullName}</div>
-                        <div className="text-xs text-gray-500">{player.country} • {player.role}</div>
+                        <div className="flex items-center justify-between">
+                          <span className="font-medium text-gray-900 text-xs">{player.fullName}</span>
+                          <span className="text-xs text-gray-400 ml-2">{player.country}</span>
+                        </div>
                       </button>
                     ))
                   ) : (
-                    <div className="px-4 py-3 text-sm text-gray-500 text-center">
+                    <div className="px-3 py-2 text-xs text-gray-500 text-center">
                       No players found
                     </div>
                   )}
@@ -328,12 +345,12 @@ export const App = () => {
           </div>
 
           {/* Column headers - serve as legend */}
-          <div className="grid grid-cols-[1fr,40px,40px,40px,40px] gap-1 px-3 py-2 bg-gray-50 border-b border-gray-200 text-xs font-medium text-gray-500">
-            <div>Player</div>
-            <div className="text-center" title="Played in match">P</div>
-            <div className="text-center" title="Same Team">T</div>
-            <div className="text-center" title="Same Role">R</div>
-            <div className="text-center" title="Is MVP">M</div>
+          <div className="flex items-center px-3 py-2 bg-gray-50 border-b border-gray-200 text-xs font-medium text-gray-500">
+            <div className="flex-1">Player</div>
+            <div className="w-10 text-center" title="Played in match">P</div>
+            <div className="w-10 text-center" title="Same Team">T</div>
+            <div className="w-10 text-center" title="Same Role">R</div>
+            <div className="w-10 text-center" title="Is MVP">M</div>
           </div>
 
           {/* Feedback rows - newest first */}
@@ -474,18 +491,18 @@ export const App = () => {
   );
 };
 
-// Compact Feedback Row Component - grid layout matching headers
+// Compact Feedback Row Component - flexbox layout matching headers
 function FeedbackRow({ feedback, isNew }: { feedback: GuessFeedback; isNew: boolean }) {
   return (
-    <div className={`grid grid-cols-[1fr,40px,40px,40px,40px] gap-1 px-3 py-2 items-center ${isNew ? 'bg-orange-50' : ''}`}>
-      <div className="min-w-0">
+    <div className={`flex items-center px-3 py-2 ${isNew ? 'bg-orange-50' : ''}`}>
+      <div className="flex-1 min-w-0">
         <div className="font-medium text-gray-900 text-sm truncate">{feedback.playerName}</div>
         <div className="text-xs text-gray-500 truncate">{feedback.country}</div>
       </div>
-      <FeedbackIndicator value={feedback.playedInGame} />
-      <FeedbackIndicator value={feedback.sameTeam} />
-      <FeedbackIndicator value={feedback.sameRole} />
-      <FeedbackIndicator value={feedback.isMVP} highlight />
+      <div className="w-10 flex justify-center"><FeedbackIndicator value={feedback.playedInGame} /></div>
+      <div className="w-10 flex justify-center"><FeedbackIndicator value={feedback.sameTeam} /></div>
+      <div className="w-10 flex justify-center"><FeedbackIndicator value={feedback.sameRole} /></div>
+      <div className="w-10 flex justify-center"><FeedbackIndicator value={feedback.isMVP} highlight /></div>
     </div>
   );
 }
@@ -494,7 +511,7 @@ function FeedbackRow({ feedback, isNew }: { feedback: GuessFeedback; isNew: bool
 function FeedbackIndicator({ value, highlight = false }: { value: boolean; highlight?: boolean }) {
   return (
     <div
-      className={`w-8 h-6 rounded flex items-center justify-center text-xs font-bold mx-auto ${
+      className={`w-8 h-6 rounded flex items-center justify-center text-xs font-bold ${
         value
           ? highlight
             ? 'bg-yellow-100 text-yellow-800'

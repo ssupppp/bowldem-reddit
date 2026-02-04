@@ -1,6 +1,6 @@
 {
   "$schema": "https://developers.reddit.com/schema/config-file.v1.json",
-  "name": "bowldem",
+  "name": "playbowldem",
   "post": {
     "dir": "dist/client",
     "entrypoints": {
@@ -20,6 +20,12 @@
   "media": {
     "dir": "assets"
   },
+  "permissions": {
+    "reddit": {
+      "enable": true
+    },
+    "redis": true
+  },
   "menu": {
     "items": [
       {
@@ -32,6 +38,6 @@
     ]
   },
   "dev": {
-    "subreddit": "bowldem_dev"
+    "subreddit": "playbowldem_dev"
   }
 }
