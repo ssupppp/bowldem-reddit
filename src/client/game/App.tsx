@@ -1,7 +1,6 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useGame } from '../hooks/useGame';
 import type { Player, GuessFeedback } from '../../shared/types/game';
-import { generateShareText } from '../../shared/gameLogic';
 
 export const App = () => {
   const {
@@ -28,6 +27,9 @@ export const App = () => {
   const [showStats, setShowStats] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [copyState, setCopyState] = useState<'idle' | 'copied'>('idle');
+  const [selectedIndex, setSelectedIndex] = useState(-1);
+  const [countdown, setCountdown] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
 
   // Filter players for autocomplete
   const filteredPlayers = useMemo(() => {
@@ -41,29 +43,107 @@ export const App = () => {
       .slice(0, 6);
   }, [searchQuery, players, usedPlayerIds]);
 
+  // Reverse feedback list for newest-first display (memoized)
+  const reversedFeedback = useMemo(() => [...feedbackList].reverse(), [feedbackList]);
+
+  // Reset selected index when filtered players change
+  useEffect(() => {
+    setSelectedIndex(-1);
+  }, [filteredPlayers]);
+
+  // Countdown timer for next puzzle
+  useEffect(() => {
+    if (!isGameOver) return;
+
+    const updateCountdown = () => {
+      const now = new Date();
+      const tomorrow = new Date(now);
+      tomorrow.setUTCHours(24, 0, 0, 0); // Midnight UTC
+      const diff = tomorrow.getTime() - now.getTime();
+
+      const hours = Math.floor(diff / (1000 * 60 * 60));
+      const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+      setCountdown(`${hours}h ${minutes}m`);
+    };
+
+    updateCountdown();
+    const interval = setInterval(updateCountdown, 60000); // Update every minute
+    return () => clearInterval(interval);
+  }, [isGameOver]);
+
   // Handle player selection
   const handleSelectPlayer = useCallback(async (player: Player) => {
     setSearchQuery('');
     setShowSuggestions(false);
+    setSelectedIndex(-1);
     await submitGuess(player.id);
   }, [submitGuess]);
 
+  // Generate share emoji grid
+  const generateShareText = useCallback(() => {
+    const header = `🏏 Bowldem #${puzzleNumber} ${gameStatus === 'won' ? guessesUsed : 'X'}/${maxGuesses}`;
+    const streak = stats?.currentStreak && stats.currentStreak > 1 ? `🔥 ${stats.currentStreak}` : '';
+
+    const grid = feedbackList.map(fb => {
+      const p = fb.playedInGame ? '🟩' : '⬛';
+      const t = fb.sameTeam ? '🟩' : '⬛';
+      const r = fb.sameRole ? '🟩' : '⬛';
+      const m = fb.isMVP ? '🎯' : '⬛';
+      return `${p}${t}${r}${m}`;
+    }).join('\n');
+
+    return `${header}${streak ? ' ' + streak : ''}\n\n${grid}\n\nhttps://reddit.com/r/bowldem`;
+  }, [puzzleNumber, gameStatus, guessesUsed, maxGuesses, feedbackList, stats]);
+
   // Handle share
   const handleShare = useCallback(() => {
-    const shareText = generateShareText(
-      puzzleNumber,
-      feedbackList,
-      stats?.currentStreak || 0
-    );
+    const shareText = generateShareText();
     navigator.clipboard.writeText(shareText).then(() => {
       setCopyState('copied');
       setTimeout(() => setCopyState('idle'), 2000);
     });
-  }, [puzzleNumber, feedbackList, stats]);
+  }, [generateShareText]);
+
+  // Keyboard navigation
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (!showSuggestions || filteredPlayers.length === 0) {
+      if (e.key === 'Escape') {
+        setShowSuggestions(false);
+      }
+      return;
+    }
+
+    switch (e.key) {
+      case 'ArrowDown':
+        e.preventDefault();
+        setSelectedIndex(prev =>
+          prev < filteredPlayers.length - 1 ? prev + 1 : 0
+        );
+        break;
+      case 'ArrowUp':
+        e.preventDefault();
+        setSelectedIndex(prev =>
+          prev > 0 ? prev - 1 : filteredPlayers.length - 1
+        );
+        break;
+      case 'Enter':
+        e.preventDefault();
+        if (selectedIndex >= 0 && selectedIndex < filteredPlayers.length) {
+          handleSelectPlayer(filteredPlayers[selectedIndex]);
+        }
+        break;
+      case 'Escape':
+        e.preventDefault();
+        setShowSuggestions(false);
+        setSelectedIndex(-1);
+        break;
+    }
+  }, [showSuggestions, filteredPlayers, selectedIndex, handleSelectPlayer]);
 
   // Close dropdown when clicking outside
   const handleBackdropClick = useCallback(() => {
     setShowSuggestions(false);
+    setSelectedIndex(-1);
   }, []);
 
   if (loading) {
@@ -83,9 +163,6 @@ export const App = () => {
       </div>
     );
   }
-
-  // Reverse feedback list for newest-first display
-  const reversedFeedback = [...feedbackList].reverse();
 
   return (
     <div className="h-screen bg-gray-50 flex flex-col overflow-hidden">
@@ -156,6 +233,7 @@ export const App = () => {
                 </svg>
               </div>
               <input
+                ref={inputRef}
                 type="text"
                 value={searchQuery}
                 onChange={(e) => {
@@ -163,6 +241,7 @@ export const App = () => {
                   setShowSuggestions(e.target.value.length >= 3);
                 }}
                 onFocus={() => setShowSuggestions(searchQuery.length >= 3)}
+                onKeyDown={handleKeyDown}
                 placeholder="Type a player name..."
                 disabled={isSubmitting}
                 className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent text-gray-900 bg-white"
@@ -170,7 +249,7 @@ export const App = () => {
             </div>
 
             {/* Dropdown with backdrop */}
-            {showSuggestions && filteredPlayers.length > 0 && (
+            {showSuggestions && searchQuery.length >= 3 && (
               <>
                 {/* Backdrop overlay */}
                 <div
@@ -179,16 +258,24 @@ export const App = () => {
                 />
                 {/* Dropdown */}
                 <div className="absolute z-20 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-[200px] overflow-auto">
-                  {filteredPlayers.map((player) => (
-                    <button
-                      key={player.id}
-                      onClick={() => handleSelectPlayer(player)}
-                      className="w-full px-4 py-2.5 text-left hover:bg-gray-50 border-b border-gray-100 last:border-0"
-                    >
-                      <div className="font-medium text-gray-900 text-sm">{player.fullName}</div>
-                      <div className="text-xs text-gray-500">{player.country} • {player.role}</div>
-                    </button>
-                  ))}
+                  {filteredPlayers.length > 0 ? (
+                    filteredPlayers.map((player, index) => (
+                      <button
+                        key={player.id}
+                        onClick={() => handleSelectPlayer(player)}
+                        className={`w-full px-4 py-2.5 text-left border-b border-gray-100 last:border-0 ${
+                          index === selectedIndex ? 'bg-orange-50' : 'hover:bg-gray-50'
+                        }`}
+                      >
+                        <div className="font-medium text-gray-900 text-sm">{player.fullName}</div>
+                        <div className="text-xs text-gray-500">{player.country} • {player.role}</div>
+                      </button>
+                    ))
+                  ) : (
+                    <div className="px-4 py-3 text-sm text-gray-500 text-center">
+                      No players found
+                    </div>
+                  )}
                 </div>
               </>
             )}
@@ -224,6 +311,11 @@ export const App = () => {
             >
               {copyState === 'copied' ? '✓ Copied!' : '📤 Share Result'}
             </button>
+            {countdown && (
+              <div className="mt-3 text-xs text-gray-500">
+                Next puzzle in {countdown}
+              </div>
+            )}
           </div>
         )}
 
