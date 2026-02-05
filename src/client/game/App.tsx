@@ -32,13 +32,23 @@ export const App = () => {
   const [copyState, setCopyState] = useState<'idle' | 'copied'>('idle');
   const [selectedIndex, setSelectedIndex] = useState(-1);
   const [countdown, setCountdown] = useState('');
+  const [pendingGuess, setPendingGuess] = useState<Player | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Filter players for autocomplete (deduplicated by name, more results)
+  // Filter players for autocomplete (deduplicated, sorted by role then country)
   const filteredPlayers = useMemo(() => {
     if (searchQuery.length < 2) return [];
     const query = searchQuery.toLowerCase();
     const seenNames = new Set<string>();
+
+    // Role priority order
+    const roleOrder: Record<string, number> = {
+      'Batsman': 1,
+      'All-rounder': 2,
+      'Bowler': 3,
+      'Wicketkeeper': 4
+    };
+
     return players
       .filter(p => {
         if (!p.fullName.toLowerCase().includes(query)) return false;
@@ -48,6 +58,14 @@ export const App = () => {
         if (seenNames.has(nameLower)) return false;
         seenNames.add(nameLower);
         return true;
+      })
+      .sort((a, b) => {
+        // Sort by role first
+        const roleA = roleOrder[a.role] || 99;
+        const roleB = roleOrder[b.role] || 99;
+        if (roleA !== roleB) return roleA - roleB;
+        // Then by country
+        return a.country.localeCompare(b.country);
       })
       .slice(0, 12);
   }, [searchQuery, players, usedPlayerIds]);
@@ -108,7 +126,9 @@ export const App = () => {
     setSearchQuery('');
     setShowSuggestions(false);
     setSelectedIndex(-1);
+    setPendingGuess(player); // Show name immediately
     await submitGuess(player.id);
+    setPendingGuess(null); // Clear after feedback received
   }, [submitGuess]);
 
   // Generate share emoji grid
@@ -139,7 +159,7 @@ export const App = () => {
       window.prompt('Copy this text to share:', shareText);
       setCopyState('copied');
     }
-    setTimeout(() => setCopyState('idle'), 2000);
+    setTimeout(() => setCopyState('idle'), 5000);
   }, [generateShareText]);
 
   // Keyboard navigation
@@ -213,9 +233,9 @@ export const App = () => {
       {/* Compact Header - 50px */}
       <header className="bg-white border-b border-gray-200 px-3 py-2 shrink-0">
         <div className="max-w-lg mx-auto flex items-center justify-between h-[34px]">
-          <div className="flex items-center gap-2">
-            <span className="text-xl">🏏</span>
-            <h1 className="text-base font-bold text-gray-900">Bowldem #{puzzleNumber}</h1>
+          <div className="flex items-center gap-1.5">
+            <span className="text-lg">🏏</span>
+            <h1 className="text-sm font-bold text-gray-900">#{puzzleNumber}</h1>
           </div>
           <div className="flex items-center gap-1">
             {/* Guesses remaining badge */}
@@ -258,31 +278,31 @@ export const App = () => {
 
       {/* Main Content - fills remaining space */}
       <main className="flex-1 px-3 py-3 max-w-lg mx-auto w-full overflow-y-auto">
-        {/* Compact Scorecard - hide team details until won */}
+        {/* Compact Scorecard - show scores always, hide team names until won */}
         {puzzle && (
           <div className="bg-white rounded-lg shadow-sm p-3 mb-3">
             <div className="flex items-center justify-center gap-1 text-gray-600 text-sm mb-2">
               <span>📍</span>
               <span className="font-medium truncate">{puzzle.venue}</span>
             </div>
-            <div className="flex items-center justify-center gap-3 text-center">
+            <div className="flex items-center justify-center gap-4 text-center">
               <div className="flex-1 text-right">
-                <span className="font-semibold text-gray-900">
-                  {gameStatus === 'won' ? puzzle.team1Score : '???'}
-                </span>
+                <div className="text-xs text-gray-500 mb-0.5">
+                  {gameStatus === 'won' ? puzzle.team1Name : 'Team 1'}
+                </div>
+                <span className="font-semibold text-gray-900">{puzzle.team1Score}</span>
               </div>
-              <div className="text-gray-400 text-xs">vs</div>
+              <div className="text-gray-400 text-sm font-medium">vs</div>
               <div className="flex-1 text-left">
-                <span className="font-semibold text-gray-900">
-                  {gameStatus === 'won' ? puzzle.team2Score : '???'}
-                </span>
+                <div className="text-xs text-gray-500 mb-0.5">
+                  {gameStatus === 'won' ? puzzle.team2Name : 'Team 2'}
+                </div>
+                <span className="font-semibold text-gray-900">{puzzle.team2Score}</span>
               </div>
             </div>
-            {gameStatus === 'won' && (
-              <div className="text-center text-xs text-gray-500 mt-2">
-                T20 World Cup Match
-              </div>
-            )}
+            <div className="text-center text-xs text-gray-400 mt-2">
+              T20 World Cup
+            </div>
           </div>
         )}
 
@@ -354,37 +374,49 @@ export const App = () => {
           </div>
         )}
 
-        {/* Game Over Result - replaces input when game ends */}
+        {/* Game Over Result - compact to avoid scrollbar */}
         {isGameOver && (
-          <div className="bg-white rounded-lg shadow-sm p-4 mb-3 text-center">
-            <div className="text-3xl mb-2">
-              {gameStatus === 'won' ? '🎉' : '😔'}
-            </div>
-            <h2 className="text-lg font-bold text-gray-900 mb-1">
-              {gameStatus === 'won' ? 'Correct!' : 'Game Over'}
-            </h2>
-            <p className="text-gray-600 text-sm mb-3">
-              {gameStatus === 'won'
-                ? `Solved in ${guessesUsed}/${maxGuesses} guesses!`
-                : 'Better luck tomorrow!'}
-            </p>
-            {stats && stats.currentStreak > 1 && (
-              <div className="text-orange-500 font-medium text-sm mb-3">
-                🔥 {stats.currentStreak} day streak!
+          <div className="bg-white rounded-lg shadow-sm p-3 mb-2 text-center">
+            <div className="flex items-center justify-center gap-2 mb-1">
+              <span className="text-2xl">{gameStatus === 'won' ? '🎉' : '😔'}</span>
+              <div>
+                <h2 className="text-base font-bold text-gray-900">
+                  {gameStatus === 'won' ? 'Correct!' : 'Game Over'}
+                </h2>
+                <p className="text-gray-600 text-xs">
+                  {gameStatus === 'won'
+                    ? `Solved in ${guessesUsed}/${maxGuesses} guesses!`
+                    : 'Better luck tomorrow!'}
+                  {stats && stats.currentStreak > 1 && ` 🔥 ${stats.currentStreak} streak`}
+                </p>
               </div>
-            )}
+            </div>
+
+            {/* Share Preview - one row per guess */}
+            <div className="bg-gray-50 rounded p-2 mb-2">
+              <div className="flex flex-col items-center gap-0.5">
+                {feedbackList.map((fb, i) => {
+                  const p = fb.playedInGame ? '🟩' : '⬛';
+                  const t = fb.sameTeam ? '🟩' : '⬛';
+                  const r = fb.sameRole ? '🟩' : '⬛';
+                  const m = fb.isMVP ? '🎯' : '⬛';
+                  return <span key={i} className="text-sm leading-tight">{p}{t}{r}{m}</span>;
+                })}
+              </div>
+            </div>
+
             <button
               onClick={handleShare}
-              className={`w-full px-4 py-2.5 rounded-lg font-medium transition-colors text-sm ${
+              className={`w-full px-3 py-2 rounded-lg font-medium transition-colors text-sm ${
                 copyState === 'copied'
                   ? 'bg-green-500 text-white'
                   : 'bg-orange-500 text-white hover:bg-orange-600'
               }`}
             >
-              {copyState === 'copied' ? '✓ Copied!' : '📤 Share Result'}
+              {copyState === 'copied' ? '✓ Copied!' : '📤 Copy & Share'}
             </button>
             {countdown && (
-              <div className="mt-3 text-xs text-gray-500">
+              <div className="mt-2 text-xs text-gray-400">
                 Next puzzle in {countdown}
               </div>
             )}
@@ -409,13 +441,26 @@ export const App = () => {
           </div>
 
           {/* Feedback rows - newest first */}
-          {reversedFeedback.length > 0 ? (
+          {(reversedFeedback.length > 0 || pendingGuess) ? (
             <div className="divide-y divide-gray-100">
+              {/* Pending guess row - shows immediately while waiting for API */}
+              {pendingGuess && (
+                <div className="flex items-center px-3 py-2 bg-amber-50 animate-pulse">
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-gray-900 text-sm truncate">{pendingGuess.fullName}</div>
+                    <div className="text-xs text-gray-500 truncate">{pendingGuess.country}</div>
+                  </div>
+                  <div className="w-10 flex justify-center"><LoadingDot /></div>
+                  <div className="w-10 flex justify-center"><LoadingDot /></div>
+                  <div className="w-10 flex justify-center"><LoadingDot /></div>
+                  <div className="w-10 flex justify-center"><LoadingDot /></div>
+                </div>
+              )}
               {reversedFeedback.map((feedback, index) => (
                 <FeedbackRow
                   key={feedbackList.length - 1 - index}
                   feedback={feedback}
-                  isNew={index === 0 && !isSubmitting}
+                  isNew={index === 0 && !pendingGuess && !isSubmitting}
                 />
               ))}
             </div>
@@ -633,7 +678,7 @@ export const App = () => {
 // Compact Feedback Row Component - flexbox layout matching headers
 function FeedbackRow({ feedback, isNew }: { feedback: GuessFeedback; isNew: boolean }) {
   return (
-    <div className={`flex items-center px-3 py-2 ${isNew ? 'bg-orange-50' : ''}`}>
+    <div className={`flex items-center px-3 py-2 ${isNew ? 'bg-amber-100 border-l-4 border-amber-400' : ''}`}>
       <div className="flex-1 min-w-0">
         <div className="font-medium text-gray-900 text-sm truncate">{feedback.playerName}</div>
         <div className="text-xs text-gray-500 truncate">{feedback.country}</div>
@@ -653,12 +698,21 @@ function FeedbackIndicator({ value, highlight = false }: { value: boolean; highl
       className={`w-8 h-6 rounded flex items-center justify-center text-xs font-bold ${
         value
           ? highlight
-            ? 'bg-yellow-100 text-yellow-800'
-            : 'bg-green-100 text-green-800'
-          : 'bg-red-100 text-red-800'
+            ? 'bg-amber-300 text-amber-900'
+            : 'bg-green-200 text-green-900'
+          : 'bg-red-200 text-red-900'
       }`}
     >
       {value ? '✓' : '✗'}
+    </div>
+  );
+}
+
+// Loading dot for pending guess
+function LoadingDot() {
+  return (
+    <div className="w-8 h-6 rounded bg-gray-200 flex items-center justify-center">
+      <div className="w-2 h-2 bg-gray-400 rounded-full animate-pulse"></div>
     </div>
   );
 }

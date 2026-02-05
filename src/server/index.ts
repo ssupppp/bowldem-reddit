@@ -76,8 +76,15 @@ router.get<object, InitResponse | { status: string; message: string }>(
       ]);
 
       let gameState: GameState | null = null;
+      let feedbackHistory: any[] = [];
       if (gameStateJson) {
         gameState = JSON.parse(gameStateJson);
+        // Rebuild feedback history from saved guesses
+        if (gameState && gameState.guesses && gameState.guesses.length > 0) {
+          feedbackHistory = gameState.guesses
+            .map(playerKey => generateFeedback(playerKey, puzzle, playersLookup))
+            .filter(fb => fb !== null);
+        }
       }
 
       let stats: UserStats = createDefaultStats();
@@ -94,11 +101,14 @@ router.get<object, InitResponse | { status: string; message: string }>(
         puzzle: {
           id: puzzle.id,
           venue: puzzle.matchData.scorecard.venue,
+          team1Name: puzzle.matchData.scorecard.team1Name,
+          team2Name: puzzle.matchData.scorecard.team2Name,
           team1Score: puzzle.matchData.scorecard.team1Score,
           team2Score: puzzle.matchData.scorecard.team2Score,
         },
         gameState,
-        stats
+        stats,
+        feedbackHistory
       });
     } catch (error) {
       console.error(`API Init Error:`, error);

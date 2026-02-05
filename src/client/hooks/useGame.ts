@@ -18,6 +18,8 @@ interface GameHookState {
   puzzle: {
     id: number;
     venue: string;
+    team1Name: string;
+    team2Name: string;
     team1Score: string;
     team2Score: string;
   } | null;
@@ -69,7 +71,7 @@ export function useGame() {
           gameState: initData.gameState,
           stats: initData.stats,
           players: playersData.players || [],
-          feedbackList: [] // Will rebuild from guesses if needed
+          feedbackList: initData.feedbackHistory || [] // Restore from server
         }));
       } catch (err) {
         console.error('Init error:', err);
