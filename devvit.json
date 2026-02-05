@@ -1,8 +1,6 @@
 {
   "$schema": "https://developers.reddit.com/schema/config-file.v1.json",
   "name": "playbowldem",
-  "version": "0.0.6",
-  "description": "A daily cricket puzzle for T20 World Cup fans! Guess the Man of the Match in 5 tries using venue and scorecard clues. Perfect for cricket enthusiasts and trivia lovers who want to relive iconic moments. Features leaderboards, stats tracking, and shareable emoji results.",
   "post": {
     "dir": "dist/client",
     "entrypoints": {
