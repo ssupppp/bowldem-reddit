@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useGame } from '../hooks/useGame';
-import type { Player, GuessFeedback } from '../../shared/types/game';
+import type { Player, GuessFeedback, LeaderboardEntry } from '../../shared/types/game';
 
 export const App = () => {
   const {
@@ -26,6 +26,9 @@ export const App = () => {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [showStats, setShowStats] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
+  const [leaderboardData, setLeaderboardData] = useState<{ entries: LeaderboardEntry[]; userEntry?: LeaderboardEntry } | null>(null);
+  const [leaderboardLoading, setLeaderboardLoading] = useState(false);
   const [copyState, setCopyState] = useState<'idle' | 'copied'>('idle');
   const [selectedIndex, setSelectedIndex] = useState(-1);
   const [countdown, setCountdown] = useState('');
@@ -77,6 +80,29 @@ export const App = () => {
     return () => clearInterval(interval);
   }, [isGameOver]);
 
+  // Fetch leaderboard data
+  const fetchLeaderboard = useCallback(async () => {
+    if (leaderboardLoading) return;
+    setLeaderboardLoading(true);
+    try {
+      const res = await fetch('/api/leaderboard');
+      if (res.ok) {
+        const data = await res.json();
+        setLeaderboardData({ entries: data.entries, userEntry: data.userEntry });
+      }
+    } catch (err) {
+      console.error('Leaderboard fetch error:', err);
+    } finally {
+      setLeaderboardLoading(false);
+    }
+  }, [leaderboardLoading]);
+
+  // Open leaderboard modal
+  const handleOpenLeaderboard = useCallback(() => {
+    setShowLeaderboard(true);
+    fetchLeaderboard();
+  }, [fetchLeaderboard]);
+
   // Handle player selection
   const handleSelectPlayer = useCallback(async (player: Player) => {
     setSearchQuery('');
@@ -101,13 +127,19 @@ export const App = () => {
     return `${header}${streak ? ' ' + streak : ''}\n\n${grid}\n\nhttps://reddit.com/r/playbowldem`;
   }, [puzzleNumber, gameStatus, guessesUsed, maxGuesses, feedbackList, stats]);
 
-  // Handle share
-  const handleShare = useCallback(() => {
+  // Handle share with clipboard fallback
+  const handleShare = useCallback(async () => {
     const shareText = generateShareText();
-    navigator.clipboard.writeText(shareText).then(() => {
+    try {
+      await navigator.clipboard.writeText(shareText);
       setCopyState('copied');
-      setTimeout(() => setCopyState('idle'), 2000);
-    });
+    } catch (err) {
+      // Fallback: show text in prompt for manual copy
+      console.warn('Clipboard API failed:', err);
+      window.prompt('Copy this text to share:', shareText);
+      setCopyState('copied');
+    }
+    setTimeout(() => setCopyState('idle'), 2000);
   }, [generateShareText]);
 
   // Keyboard navigation
@@ -165,7 +197,13 @@ export const App = () => {
     return (
       <div className="flex flex-col items-center justify-center h-screen bg-gray-50 p-4">
         <div className="text-red-500 text-lg mb-2">Error</div>
-        <div className="text-gray-600 text-center">{error}</div>
+        <div className="text-gray-600 text-center mb-4">{error}</div>
+        <button
+          onClick={() => window.location.reload()}
+          className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors"
+        >
+          Try Again
+        </button>
       </div>
     );
   }
@@ -184,6 +222,16 @@ export const App = () => {
             <span className="text-xs font-medium bg-orange-100 text-orange-700 px-2 py-1 rounded-full">
               {guessesUsed}/{maxGuesses}
             </span>
+            {/* Leaderboard button */}
+            <button
+              onClick={handleOpenLeaderboard}
+              className="p-2 hover:bg-gray-100 rounded-full text-gray-600"
+              title="Leaderboard"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
+              </svg>
+            </button>
             {/* Stats button */}
             <button
               onClick={() => setShowStats(true)}
@@ -243,9 +291,16 @@ export const App = () => {
           <div className="mb-3 relative">
             <div className="relative">
               <div className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                </svg>
+                {isSubmitting ? (
+                  <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                ) : (
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                )}
               </div>
               <input
                 ref={inputRef}
@@ -257,9 +312,9 @@ export const App = () => {
                 }}
                 onFocus={() => setShowSuggestions(searchQuery.length >= 2)}
                 onKeyDown={handleKeyDown}
-                placeholder="Type a player name..."
+                placeholder={isSubmitting ? "Checking..." : "Type a player name..."}
                 disabled={isSubmitting}
-                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent text-gray-900 bg-white"
+                className={`w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent text-gray-900 bg-white ${isSubmitting ? 'opacity-60' : ''}`}
               />
             </div>
 
@@ -484,6 +539,90 @@ export const App = () => {
               </div>
               <p className="text-gray-500">A new puzzle is available every day!</p>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Leaderboard Modal */}
+      {showLeaderboard && (
+        <div
+          className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50"
+          onClick={() => setShowLeaderboard(false)}
+        >
+          <div
+            className="bg-white rounded-xl p-5 max-w-sm w-full max-h-[80vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-lg font-bold text-gray-900">🏆 Today's Leaderboard</h2>
+              <button
+                onClick={() => setShowLeaderboard(false)}
+                className="text-gray-400 hover:text-gray-600 p-1"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-auto">
+              {leaderboardLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <svg className="w-6 h-6 animate-spin text-orange-500" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                </div>
+              ) : leaderboardData && leaderboardData.entries.length > 0 ? (
+                <div className="space-y-1">
+                  {/* Header */}
+                  <div className="flex items-center px-2 py-1 text-xs text-gray-500 font-medium border-b">
+                    <div className="w-8">#</div>
+                    <div className="flex-1">Player</div>
+                    <div className="w-16 text-center">Guesses</div>
+                  </div>
+                  {/* Entries */}
+                  {leaderboardData.entries.map((entry) => (
+                    <div
+                      key={entry.username}
+                      className={`flex items-center px-2 py-2 rounded ${
+                        leaderboardData.userEntry?.username === entry.username
+                          ? 'bg-orange-50 border border-orange-200'
+                          : 'hover:bg-gray-50'
+                      }`}
+                    >
+                      <div className="w-8 text-sm font-medium text-gray-600">
+                        {entry.rank === 1 ? '🥇' : entry.rank === 2 ? '🥈' : entry.rank === 3 ? '🥉' : entry.rank}
+                      </div>
+                      <div className="flex-1 text-sm text-gray-900 truncate">
+                        u/{entry.username}
+                      </div>
+                      <div className="w-16 text-center text-sm font-medium text-gray-700">
+                        {entry.guessCount}/5
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-8 text-gray-500 text-sm">
+                  No winners yet today. Be the first!
+                </div>
+              )}
+            </div>
+
+            {/* User's rank if not in top 20 */}
+            {leaderboardData?.userEntry && !leaderboardData.entries.find(e => e.username === leaderboardData.userEntry?.username) && (
+              <div className="mt-4 pt-4 border-t">
+                <div className="text-xs text-gray-500 mb-1">Your rank</div>
+                <div className="flex items-center px-2 py-2 bg-orange-50 rounded border border-orange-200">
+                  <div className="w-8 text-sm font-medium text-gray-600">{leaderboardData.userEntry.rank}</div>
+                  <div className="flex-1 text-sm text-gray-900">u/{leaderboardData.userEntry.username}</div>
+                  <div className="w-16 text-center text-sm font-medium text-gray-700">
+                    {leaderboardData.userEntry.guessCount}/5
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
