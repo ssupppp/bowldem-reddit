@@ -8,7 +8,8 @@ import type {
   LeaderboardEntry,
   GameState,
   UserStats,
-  Player
+  Player,
+  MatchSummary
 } from '../shared/types/game';
 import {
   getTodayUTC,
@@ -38,6 +39,53 @@ const playersLookup: Record<string, Player> = {};
 });
 
 const PUZZLES = (matchPuzzlesData as { puzzles: any[] }).puzzles || [];
+
+// Build set of active player IDs (appeared in any T20 WC match)
+const activePlayerIds = new Set<string>();
+PUZZLES.forEach((p: any) => {
+  p.matchData.playersInMatch.forEach((id: string) => activePlayerIds.add(id));
+});
+
+// Derive team names from player data when scorecard is missing them
+function getTeamNames(puzzle: any): { team1Name: string; team2Name: string } {
+  const sc = puzzle.matchData.scorecard;
+  if (sc.team1Name && sc.team2Name) return { team1Name: sc.team1Name, team2Name: sc.team2Name };
+
+  // Infer from players in match — find the two distinct countries
+  const teams = new Set<string>();
+  for (const pid of puzzle.matchData.playersInMatch) {
+    const p = playersLookup[pid];
+    if (p) teams.add(p.country);
+    if (teams.size >= 2) break;
+  }
+  const teamArr = [...teams];
+  // targetPlayerTeam is team1 by convention in puzzles where "Team 1" won/lost
+  const mvpTeam = puzzle.matchData.targetPlayerTeam;
+  const team1 = mvpTeam && teamArr.includes(mvpTeam) ? mvpTeam : (teamArr[0] || 'Team 1');
+  const team2 = teamArr.find(t => t !== team1) || 'Team 2';
+  return { team1Name: team1, team2Name: team2 };
+}
+
+// Build match summary for game-over reveal
+function buildMatchSummary(puzzle: any): MatchSummary {
+  const mvp = playersLookup[puzzle.targetPlayer];
+  const sc = puzzle.matchData.scorecard;
+  const { team1Name, team2Name } = getTeamNames(puzzle);
+  // Replace "Team 1"/"Team 2" in result with actual team names
+  let result = sc.result as string;
+  result = result.replace('Team 1', team1Name).replace('Team 2', team2Name);
+  return {
+    result,
+    team1Name,
+    team2Name,
+    team1Score: sc.team1Score,
+    team2Score: sc.team2Score,
+    mvpName: mvp?.fullName ?? puzzle.targetPlayer,
+    mvpCountry: mvp?.country ?? puzzle.matchData.targetPlayerTeam,
+    mvpRole: mvp?.role ?? puzzle.matchData.targetPlayerRole,
+    cricinfoUrl: puzzle.cricinfoUrl,
+  };
+}
 
 // Redis key helpers
 const getGameStateKey = (userId: string, puzzleDate: string) =>
@@ -92,6 +140,11 @@ router.get<object, InitResponse | { status: string; message: string }>(
         stats = { ...stats, ...JSON.parse(statsJson) };
       }
 
+      // Include match summary if game is over
+      const isWon = gameState?.gameStatus === 'won';
+
+      const { team1Name, team2Name } = getTeamNames(puzzle);
+
       res.json({
         type: 'init',
         postId,
@@ -101,14 +154,15 @@ router.get<object, InitResponse | { status: string; message: string }>(
         puzzle: {
           id: puzzle.id,
           venue: puzzle.matchData.scorecard.venue,
-          team1Name: puzzle.matchData.scorecard.team1Name,
-          team2Name: puzzle.matchData.scorecard.team2Name,
+          team1Name,
+          team2Name,
           team1Score: puzzle.matchData.scorecard.team1Score,
           team2Score: puzzle.matchData.scorecard.team2Score,
         },
         gameState,
         stats,
-        feedbackHistory
+        feedbackHistory,
+        ...(isWon ? { matchSummary: buildMatchSummary(puzzle) } : {})
       });
     } catch (error) {
       console.error(`API Init Error:`, error);
@@ -209,7 +263,8 @@ router.post<object, GuessResponse | { status: string; message: string }>(
         type: 'guess',
         feedback,
         gameState,
-        stats
+        stats,
+        ...(isWin ? { matchSummary: buildMatchSummary(puzzle) } : {})
       });
     } catch (error) {
       console.error(`API Guess Error:`, error);
@@ -272,12 +327,26 @@ router.get<object, LeaderboardResponse | { status: string; message: string }>(
   }
 );
 
+// Debug: reset game state for current user (dev only)
+router.post('/api/debug/reset', async (_req, res): Promise<void> => {
+  try {
+    const username = await reddit.getCurrentUsername() ?? 'anonymous';
+    const puzzleDate = getTodayUTC();
+    const gameStateKey = getGameStateKey(username, puzzleDate);
+    await redis.del(gameStateKey);
+    res.json({ status: 'ok', message: `Reset game for ${username} on ${puzzleDate}` });
+  } catch (error) {
+    res.status(500).json({ status: 'error', message: String(error) });
+  }
+});
+
 // Get all players (for autocomplete on client)
 router.get('/api/players', async (_req, res): Promise<void> => {
-  res.json({
-    type: 'players',
-    players: (allPlayersData as { players: Player[] }).players
-  });
+  const players = (allPlayersData as { players: Player[] }).players.map(p => ({
+    ...p,
+    active: activePlayerIds.has(p.id)
+  }));
+  res.json({ type: 'players', players });
 });
 
 // Internal: Create post on app install

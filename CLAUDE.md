@@ -61,25 +61,59 @@ bowldem:stats:{userId}               # User statistics
 bowldem:leaderboard:{puzzleDate}     # Daily leaderboard
 ```
 
-## Current Blocking Issue
-`reddit.submitCustomPost()` fails with obfuscated ValidationErrors. The error shows memory addresses instead of field names.
+## App Status (Feb 7, 2026)
+- **Version:** 0.0.12
+- **Status:** Published, awaiting Reddit review
+- All core features working (post creation, feedback restore, leaderboard)
 
-**Root Cause:** SDK makes internal request to `/r//about/moderators` (empty subreddit) - context is lost.
+## CRITICAL: Playtest Workflow
 
-**See:** `todo/DEVVIT_BUGS.md` for full debug history.
+**After `devvit upload`, you MUST restart playtest to see changes!**
+
+Old playtest sessions cache the old version. This causes confusion where you upload new code but still see old behavior.
+
+### Correct workflow:
+```bash
+# 1. Build and upload
+npm run build && npx devvit upload
+
+# 2. Kill existing playtest (find PID on port 5678)
+netstat -ano | findstr ":5678"
+powershell "Stop-Process -Id <PID> -Force"
+
+# 3. Start fresh playtest
+npx devvit playtest playbowldem_dev
+```
+
+### To test a fresh puzzle (bypass saved game state):
+Temporarily edit `src/shared/gameLogic.ts`:
+```ts
+export function getTodayUTC(): string {
+  return '2026-03-15'; // Hardcode future date
+}
+```
+Then build, upload, restart playtest. **Remember to revert after testing!**
+
+## Current Bugs & Features
+**See:** `todo/BUGS_AND_FEATURES.md` for the full tracker.
+
+### Open Bugs
+- Countdown timer inaccurate when tab inactive (low priority)
+- Duplicate share text implementations (tech debt)
+
+### Priority Features (Hackathon)
+- Show username ("Playing as u/username")
+- First-time help modal (auto-show on first visit)
+- Accessibility (ARIA labels)
+- Country flags next to player names
+- Third umpire animation for guess processing
+- Polish animations & styling
 
 ## MCP Integration
-Devvit MCP is configured (added Jan 31, 2026):
+Devvit MCP is configured:
 ```
 claude mcp add devvit -- npx -y @devvit/mcp
 ```
-**Status:** Restart Claude Code to connect.
-
-## Todo Folder
-All progress tracking in `todo/`:
-- `MIGRATION_PLAN.md` - 7-phase plan with status
-- `DAILY_LOG.md` - Session-by-session progress
-- `DEVVIT_BUGS.md` - Bug tracking & research findings
 
 ## Important Links
 - **Production Subreddit:** https://www.reddit.com/r/playbowldem/

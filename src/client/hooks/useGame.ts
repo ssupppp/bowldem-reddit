@@ -5,7 +5,8 @@ import type {
   GameState,
   UserStats,
   GuessFeedback,
-  Player
+  Player,
+  MatchSummary
 } from '../../shared/types/game';
 import { MAX_GUESSES } from '../../shared/gameLogic';
 
@@ -28,6 +29,7 @@ interface GameHookState {
   feedbackList: GuessFeedback[];
   players: Player[];
   isSubmitting: boolean;
+  matchSummary: MatchSummary | null;
 }
 
 export function useGame() {
@@ -42,7 +44,8 @@ export function useGame() {
     stats: null,
     feedbackList: [],
     players: [],
-    isSubmitting: false
+    isSubmitting: false,
+    matchSummary: null
   });
 
   // Initialize game
@@ -71,7 +74,8 @@ export function useGame() {
           gameState: initData.gameState,
           stats: initData.stats,
           players: playersData.players || [],
-          feedbackList: initData.feedbackHistory || [] // Restore from server
+          feedbackList: initData.feedbackHistory || [], // Restore from server
+          matchSummary: initData.matchSummary || null
         }));
       } catch (err) {
         console.error('Init error:', err);
@@ -111,7 +115,8 @@ export function useGame() {
         isSubmitting: false,
         gameState: data.gameState,
         stats: data.stats,
-        feedbackList: [...prev.feedbackList, data.feedback]
+        feedbackList: [...prev.feedbackList, data.feedback],
+        matchSummary: data.matchSummary || prev.matchSummary
       }));
 
       return data.feedback;

@@ -2,6 +2,40 @@ import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useGame } from '../hooks/useGame';
 import type { Player, GuessFeedback, LeaderboardEntry } from '../../shared/types/game';
 
+// Country abbreviation aliases
+const COUNTRY_ALIASES: Record<string, string> = {
+  'usa': 'United States of America', 'us': 'United States of America',
+  'united states': 'United States of America', 'america': 'United States of America',
+  'uae': 'United Arab Emirates', 'nz': 'New Zealand',
+  'sa': 'South Africa', 'wi': 'West Indies', 'windies': 'West Indies',
+  'png': 'Papua New Guinea', 'sl': 'Sri Lanka',
+  'pak': 'Pakistan', 'aus': 'Australia', 'eng': 'England',
+  'ind': 'India', 'ban': 'Bangladesh', 'afg': 'Afghanistan',
+  'zim': 'Zimbabwe', 'ire': 'Ireland', 'sco': 'Scotland',
+  'ned': 'Netherlands', 'nam': 'Namibia', 'oma': 'Oman',
+  'nep': 'Nepal', 'uga': 'Uganda', 'can': 'Canada',
+};
+
+// Role aliases
+const ROLE_ALIASES: Record<string, string> = {
+  'bat': 'Batsman', 'batter': 'Batsman', 'batsman': 'Batsman', 'batting': 'Batsman',
+  'bowl': 'Bowler', 'bowler': 'Bowler', 'bowling': 'Bowler',
+  'all': 'All-rounder', 'allrounder': 'All-rounder', 'all rounder': 'All-rounder',
+  'all-rounder': 'All-rounder', 'ar': 'All-rounder',
+  'wk': 'Wicketkeeper', 'keeper': 'Wicketkeeper',
+  'wicketkeeper': 'Wicketkeeper', 'wicket keeper': 'Wicketkeeper',
+};
+
+function getRoleBadge(role: string): { label: string; color: string } {
+  switch (role) {
+    case 'Batsman': return { label: 'BAT', color: 'bg-blue-100 text-blue-700' };
+    case 'Bowler': return { label: 'BOWL', color: 'bg-red-100 text-red-700' };
+    case 'All-rounder': return { label: 'AR', color: 'bg-purple-100 text-purple-700' };
+    case 'Wicketkeeper': return { label: 'WK', color: 'bg-green-100 text-green-700' };
+    default: return { label: role.substring(0, 3).toUpperCase(), color: 'bg-gray-100 text-gray-700' };
+  }
+}
+
 export const App = () => {
   const {
     loading,
@@ -19,7 +53,8 @@ export const App = () => {
     isGameOver,
     usedPlayerIds,
     isSubmitting,
-    submitGuess
+    submitGuess,
+    matchSummary
   } = useGame();
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -35,40 +70,69 @@ export const App = () => {
   const [pendingGuess, setPendingGuess] = useState<Player | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Filter players for autocomplete (deduplicated, sorted by role then country)
+  const isPlaytest = typeof window !== 'undefined' && window.location.search.includes('playtest');
+
+  // First-time help modal
+  useEffect(() => {
+    try {
+      if (!localStorage.getItem('bowldem_help_shown')) {
+        setShowHelp(true);
+        localStorage.setItem('bowldem_help_shown', 'true');
+      }
+    } catch (_) { /* localStorage may be blocked in webview */ }
+  }, []);
+
+  // Derive confirmed role from feedback (if any guess matched role)
+  const confirmedRole = useMemo(() => {
+    const match = feedbackList.find(fb => fb.sameRole);
+    return match?.role || null;
+  }, [feedbackList]);
+
+  // Smart autocomplete with aliases, feedback-awareness, active-first
   const filteredPlayers = useMemo(() => {
     if (searchQuery.length < 2) return [];
-    const query = searchQuery.toLowerCase();
+    const query = searchQuery.toLowerCase().trim();
     const seenNames = new Set<string>();
 
-    // Role priority order
-    const roleOrder: Record<string, number> = {
-      'Batsman': 1,
-      'All-rounder': 2,
-      'Bowler': 3,
-      'Wicketkeeper': 4
-    };
+    const aliasedCountry = COUNTRY_ALIASES[query]?.toLowerCase();
+    const aliasedRole = ROLE_ALIASES[query];
 
     return players
       .filter(p => {
-        if (!p.fullName.toLowerCase().includes(query)) return false;
+        const matchesName = p.fullName.toLowerCase().includes(query);
+        const matchesCountry = p.country.toLowerCase().includes(query) ||
+          (aliasedCountry && p.country.toLowerCase() === aliasedCountry);
+        const matchesRole = p.role.toLowerCase().includes(query) ||
+          (aliasedRole && p.role === aliasedRole);
+        if (!matchesName && !matchesCountry && !matchesRole) return false;
         if (usedPlayerIds.has(p.id)) return false;
-        // Deduplicate by name (case-insensitive)
         const nameLower = p.fullName.toLowerCase();
         if (seenNames.has(nameLower)) return false;
         seenNames.add(nameLower);
         return true;
       })
       .sort((a, b) => {
-        // Sort by role first
-        const roleA = roleOrder[a.role] || 99;
-        const roleB = roleOrder[b.role] || 99;
-        if (roleA !== roleB) return roleA - roleB;
-        // Then by country
-        return a.country.localeCompare(b.country);
+        // Active players first
+        const activeA = (a as any).active ? 1 : 0;
+        const activeB = (b as any).active ? 1 : 0;
+        if (activeA !== activeB) return activeB - activeA;
+
+        // Confirmed role first
+        if (confirmedRole) {
+          const roleMatchA = a.role === confirmedRole ? 1 : 0;
+          const roleMatchB = b.role === confirmedRole ? 1 : 0;
+          if (roleMatchA !== roleMatchB) return roleMatchB - roleMatchA;
+        }
+
+        // Name match before country/role match
+        const nameA = a.fullName.toLowerCase().includes(query) ? 1 : 0;
+        const nameB = b.fullName.toLowerCase().includes(query) ? 1 : 0;
+        if (nameA !== nameB) return nameB - nameA;
+
+        return a.fullName.localeCompare(b.fullName);
       })
       .slice(0, 12);
-  }, [searchQuery, players, usedPlayerIds]);
+  }, [searchQuery, players, usedPlayerIds, confirmedRole]);
 
   // Reverse feedback list for newest-first display (memoized)
   const reversedFeedback = useMemo(() => [...feedbackList].reverse(), [feedbackList]);
@@ -85,7 +149,7 @@ export const App = () => {
     const updateCountdown = () => {
       const now = new Date();
       const tomorrow = new Date(now);
-      tomorrow.setUTCHours(24, 0, 0, 0); // Midnight UTC
+      tomorrow.setUTCHours(24, 0, 0, 0);
       const diff = tomorrow.getTime() - now.getTime();
 
       const hours = Math.floor(diff / (1000 * 60 * 60));
@@ -94,7 +158,7 @@ export const App = () => {
     };
 
     updateCountdown();
-    const interval = setInterval(updateCountdown, 60000); // Update every minute
+    const interval = setInterval(updateCountdown, 60000);
     return () => clearInterval(interval);
   }, [isGameOver]);
 
@@ -126,21 +190,21 @@ export const App = () => {
     setSearchQuery('');
     setShowSuggestions(false);
     setSelectedIndex(-1);
-    setPendingGuess(player); // Show name immediately
+    setPendingGuess(player);
     await submitGuess(player.id);
-    setPendingGuess(null); // Clear after feedback received
+    setPendingGuess(null);
   }, [submitGuess]);
 
   // Generate share emoji grid
   const generateShareText = useCallback(() => {
-    const header = `🏏 Bowldem #${puzzleNumber} ${gameStatus === 'won' ? guessesUsed : 'X'}/${maxGuesses}`;
-    const streak = stats?.currentStreak && stats.currentStreak > 1 ? `🔥 ${stats.currentStreak}` : '';
+    const header = `\u{1F3CF} Bowldem #${puzzleNumber} ${gameStatus === 'won' ? guessesUsed : 'X'}/${maxGuesses}`;
+    const streak = stats?.currentStreak && stats.currentStreak > 1 ? `\u{1F525} ${stats.currentStreak}` : '';
 
     const grid = feedbackList.map(fb => {
-      const p = fb.playedInGame ? '🟩' : '⬛';
-      const t = fb.sameTeam ? '🟩' : '⬛';
-      const r = fb.sameRole ? '🟩' : '⬛';
-      const m = fb.isMVP ? '🎯' : '⬛';
+      const p = fb.playedInGame ? '\u{1F7E9}' : '\u2B1B';
+      const t = fb.sameTeam ? '\u{1F7E9}' : '\u2B1B';
+      const r = fb.sameRole ? '\u{1F7E9}' : '\u2B1B';
+      const m = fb.isMVP ? '\u{1F3AF}' : '\u2B1B';
       return `${p}${t}${r}${m}`;
     }).join('\n');
 
@@ -154,13 +218,21 @@ export const App = () => {
       await navigator.clipboard.writeText(shareText);
       setCopyState('copied');
     } catch (err) {
-      // Fallback: show text in prompt for manual copy
       console.warn('Clipboard API failed:', err);
-      window.prompt('Copy this text to share:', shareText);
       setCopyState('copied');
     }
     setTimeout(() => setCopyState('idle'), 5000);
   }, [generateShareText]);
+
+  // Debug reset (dev only)
+  const handleDebugReset = useCallback(async () => {
+    try {
+      await fetch('/api/debug/reset', { method: 'POST' });
+      window.location.reload();
+    } catch (e) {
+      console.error('Reset failed:', e);
+    }
+  }, []);
 
   // Keyboard navigation
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -206,8 +278,8 @@ export const App = () => {
 
   if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center h-screen bg-gray-50">
-        <div className="text-2xl mb-2">🏏</div>
+      <div className="flex flex-col items-center justify-center h-screen bg-gradient-to-b from-orange-50 via-amber-50 to-gray-100">
+        <div className="text-2xl mb-2">{'\u{1F3CF}'}</div>
         <div className="text-gray-600">Loading Bowldem...</div>
       </div>
     );
@@ -215,7 +287,7 @@ export const App = () => {
 
   if (error) {
     return (
-      <div className="flex flex-col items-center justify-center h-screen bg-gray-50 p-4">
+      <div className="flex flex-col items-center justify-center h-screen bg-gradient-to-b from-orange-50 via-amber-50 to-gray-100 p-4">
         <div className="text-red-500 text-lg mb-2">Error</div>
         <div className="text-gray-600 text-center mb-4">{error}</div>
         <button
@@ -229,23 +301,48 @@ export const App = () => {
   }
 
   return (
-    <div className="h-screen bg-gray-50 flex flex-col overflow-hidden">
-      {/* Compact Header - 50px */}
-      <header className="bg-white border-b border-gray-200 px-3 py-2 shrink-0">
+    <div className="h-screen bg-gradient-to-b from-orange-50 via-amber-50 to-gray-100 flex flex-col overflow-hidden">
+      {/* DRS scanning animation keyframes */}
+      <style>{`
+        @keyframes drs-scan {
+          0% { transform: translateX(-100%); }
+          100% { transform: translateX(100%); }
+        }
+      `}</style>
+
+      {/* Gradient Header */}
+      <header className="bg-gradient-to-r from-orange-600 to-amber-500 px-3 py-2 shrink-0 shadow-md">
         <div className="max-w-lg mx-auto flex items-center justify-between h-[34px]">
           <div className="flex items-center gap-1.5">
-            <span className="text-lg">🏏</span>
-            <h1 className="text-sm font-bold text-gray-900">#{puzzleNumber}</h1>
+            <span className="text-lg">{'\u{1F3CF}'}</span>
+            <div>
+              <h1 className="text-sm font-bold text-white">#{puzzleNumber}</h1>
+              {username && (
+                <div className="text-[10px] text-orange-100">u/{username}</div>
+              )}
+            </div>
           </div>
           <div className="flex items-center gap-1">
             {/* Guesses remaining badge */}
-            <span className="text-xs font-medium bg-orange-100 text-orange-700 px-2 py-1 rounded-full">
+            <span className="text-xs font-medium bg-white/20 text-white px-2 py-1 rounded-full">
               {guessesUsed}/{maxGuesses}
             </span>
+            {/* Dev-only reset button */}
+            {isPlaytest && (
+              <button
+                onClick={handleDebugReset}
+                className="p-1.5 hover:bg-red-500/30 rounded-full text-red-100"
+                title="Reset (Dev)"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+              </button>
+            )}
             {/* Leaderboard button */}
             <button
               onClick={handleOpenLeaderboard}
-              className="p-2 hover:bg-gray-100 rounded-full text-gray-600"
+              className="p-2 hover:bg-white/10 rounded-full text-white"
               title="Leaderboard"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -255,7 +352,7 @@ export const App = () => {
             {/* Stats button */}
             <button
               onClick={() => setShowStats(true)}
-              className="p-2 hover:bg-gray-100 rounded-full text-gray-600"
+              className="p-2 hover:bg-white/10 rounded-full text-white"
               title="Stats"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -265,7 +362,7 @@ export const App = () => {
             {/* Help button */}
             <button
               onClick={() => setShowHelp(true)}
-              className="p-2 hover:bg-gray-100 rounded-full text-gray-600"
+              className="p-2 hover:bg-white/10 rounded-full text-white"
               title="Help"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -276,37 +373,37 @@ export const App = () => {
         </div>
       </header>
 
-      {/* Main Content - fills remaining space */}
+      {/* Main Content */}
       <main className="flex-1 px-3 py-3 max-w-lg mx-auto w-full overflow-y-auto">
-        {/* Compact Scorecard - show scores always, hide team names until won */}
+        {/* Scorecard - green cricket-pitch gradient */}
         {puzzle && (
-          <div className="bg-white rounded-lg shadow-sm p-3 mb-3">
-            <div className="flex items-center justify-center gap-1 text-gray-600 text-sm mb-2">
-              <span>📍</span>
+          <div className="bg-gradient-to-br from-green-800 to-green-900 rounded-lg shadow-sm p-3 mb-3 text-white">
+            <div className="flex items-center justify-center gap-1 text-green-200 text-xs mb-2">
+              <span className="shrink-0">{'\u{1F4CD}'}</span>
               <span className="font-medium truncate">{puzzle.venue}</span>
             </div>
             <div className="flex items-center justify-center gap-4 text-center">
               <div className="flex-1 text-right">
-                <div className="text-xs text-gray-500 mb-0.5">
+                <div className="text-xs text-green-300 mb-0.5">
                   {gameStatus === 'won' ? puzzle.team1Name : 'Team 1'}
                 </div>
-                <span className="font-semibold text-gray-900">{puzzle.team1Score}</span>
+                <span className="font-semibold text-white">{puzzle.team1Score}</span>
               </div>
-              <div className="text-gray-400 text-sm font-medium">vs</div>
+              <div className="text-green-400 text-sm font-medium">vs</div>
               <div className="flex-1 text-left">
-                <div className="text-xs text-gray-500 mb-0.5">
+                <div className="text-xs text-green-300 mb-0.5">
                   {gameStatus === 'won' ? puzzle.team2Name : 'Team 2'}
                 </div>
-                <span className="font-semibold text-gray-900">{puzzle.team2Score}</span>
+                <span className="font-semibold text-white">{puzzle.team2Score}</span>
               </div>
             </div>
-            <div className="text-center text-xs text-gray-400 mt-2">
+            <div className="text-center text-xs text-green-400 mt-2">
               T20 World Cup
             </div>
           </div>
         )}
 
-        {/* Player Input - visible without scrolling */}
+        {/* Player Input */}
         {!isGameOver && (
           <div className="mb-3 relative">
             <div className="relative">
@@ -341,28 +438,34 @@ export const App = () => {
             {/* Dropdown with backdrop */}
             {showSuggestions && searchQuery.length >= 2 && (
               <>
-                {/* Backdrop overlay */}
                 <div
                   className="fixed inset-0 z-10"
                   onClick={handleBackdropClick}
                 />
-                {/* Dropdown - compact items to show more */}
                 <div className="absolute z-20 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-[280px] overflow-auto">
                   {filteredPlayers.length > 0 ? (
-                    filteredPlayers.map((player, index) => (
-                      <button
-                        key={player.id}
-                        onClick={() => handleSelectPlayer(player)}
-                        className={`w-full px-3 py-1.5 text-left border-b border-gray-100 last:border-0 ${
-                          index === selectedIndex ? 'bg-orange-50' : 'hover:bg-gray-50'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="font-medium text-gray-900 text-xs">{player.fullName}</span>
-                          <span className="text-xs text-gray-400 ml-2">{player.country}</span>
-                        </div>
-                      </button>
-                    ))
+                    filteredPlayers.map((player, index) => {
+                      const badge = getRoleBadge(player.role);
+                      return (
+                        <button
+                          key={player.id}
+                          onClick={() => handleSelectPlayer(player)}
+                          className={`w-full px-3 py-1.5 text-left border-b border-gray-100 last:border-0 ${
+                            index === selectedIndex ? 'bg-orange-50' : 'hover:bg-gray-50'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-medium text-gray-900 text-xs truncate">{player.fullName}</span>
+                            <div className="flex items-center gap-1.5 ml-2 shrink-0">
+                              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${badge.color}`}>
+                                {badge.label}
+                              </span>
+                              <span className="text-xs text-gray-400">{player.country}</span>
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })
                   ) : (
                     <div className="px-3 py-2 text-xs text-gray-500 text-center">
                       No players found
@@ -374,11 +477,49 @@ export const App = () => {
           </div>
         )}
 
-        {/* Game Over Result - compact to avoid scrollbar */}
+        {/* Match Summary - win only */}
+        {gameStatus === 'won' && matchSummary && (
+          <div className="bg-gradient-to-r from-green-50 to-emerald-50 rounded-lg shadow-sm p-3 mb-2 border border-green-200">
+            <h3 className="text-sm font-bold text-green-800 mb-2">Match Summary</h3>
+            <div className="flex items-center justify-center gap-3 mb-2">
+              <div className="text-right flex-1">
+                <div className="text-xs font-medium text-gray-700">{matchSummary.team1Name}</div>
+                <div className="text-sm font-bold text-gray-900">{matchSummary.team1Score}</div>
+              </div>
+              <div className="text-gray-400 text-xs">vs</div>
+              <div className="text-left flex-1">
+                <div className="text-xs font-medium text-gray-700">{matchSummary.team2Name}</div>
+                <div className="text-sm font-bold text-gray-900">{matchSummary.team2Score}</div>
+              </div>
+            </div>
+            <div className="text-center text-xs text-gray-600 mb-2">{matchSummary.result}</div>
+            <div className="text-center">
+              <div className="text-xs text-gray-500 mb-0.5">Man of the Match</div>
+              <div className="text-sm font-bold text-amber-700">{'\u2B50'} {matchSummary.mvpName}</div>
+              <div className="text-xs text-gray-500">{matchSummary.mvpCountry} {'\u00B7'} {matchSummary.mvpRole}</div>
+            </div>
+            {matchSummary.cricinfoUrl && (
+              <a
+                href={matchSummary.cricinfoUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block text-center text-xs text-blue-600 hover:underline mt-2"
+              >
+                View on ESPNcricinfo {'\u2192'}
+              </a>
+            )}
+          </div>
+        )}
+
+        {/* Game Over Result */}
         {isGameOver && (
-          <div className="bg-white rounded-lg shadow-sm p-3 mb-2 text-center">
+          <div className={`rounded-lg shadow-sm p-3 mb-2 text-center ${
+            gameStatus === 'won'
+              ? 'bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200'
+              : 'bg-white'
+          }`}>
             <div className="flex items-center justify-center gap-2 mb-1">
-              <span className="text-2xl">{gameStatus === 'won' ? '🎉' : '😔'}</span>
+              <span className="text-2xl">{gameStatus === 'won' ? '\u{1F389}' : '\u{1F614}'}</span>
               <div>
                 <h2 className="text-base font-bold text-gray-900">
                   {gameStatus === 'won' ? 'Correct!' : 'Game Over'}
@@ -387,19 +528,19 @@ export const App = () => {
                   {gameStatus === 'won'
                     ? `Solved in ${guessesUsed}/${maxGuesses} guesses!`
                     : 'Better luck tomorrow!'}
-                  {stats && stats.currentStreak > 1 && ` 🔥 ${stats.currentStreak} streak`}
+                  {stats && stats.currentStreak > 1 && ` \u{1F525} ${stats.currentStreak} streak`}
                 </p>
               </div>
             </div>
 
-            {/* Share Preview - one row per guess */}
+            {/* Share Preview */}
             <div className="bg-gray-50 rounded p-2 mb-2">
               <div className="flex flex-col items-center gap-0.5">
                 {feedbackList.map((fb, i) => {
-                  const p = fb.playedInGame ? '🟩' : '⬛';
-                  const t = fb.sameTeam ? '🟩' : '⬛';
-                  const r = fb.sameRole ? '🟩' : '⬛';
-                  const m = fb.isMVP ? '🎯' : '⬛';
+                  const p = fb.playedInGame ? '\u{1F7E9}' : '\u2B1B';
+                  const t = fb.sameTeam ? '\u{1F7E9}' : '\u2B1B';
+                  const r = fb.sameRole ? '\u{1F7E9}' : '\u2B1B';
+                  const m = fb.isMVP ? '\u{1F3AF}' : '\u2B1B';
                   return <span key={i} className="text-sm leading-tight">{p}{t}{r}{m}</span>;
                 })}
               </div>
@@ -413,47 +554,56 @@ export const App = () => {
                   : 'bg-orange-500 text-white hover:bg-orange-600'
               }`}
             >
-              {copyState === 'copied' ? '✓ Copied!' : '📤 Copy & Share'}
+              {copyState === 'copied' ? '\u2713 Copied!' : '\u{1F4E4} Copy & Share'}
             </button>
             {countdown && (
               <div className="mt-2 text-xs text-gray-400">
                 Next puzzle in {countdown}
               </div>
             )}
+            {/* Dev-only reset in game over */}
+            {isPlaytest && (
+              <button
+                onClick={handleDebugReset}
+                className="w-full px-3 py-1.5 bg-red-100 text-red-700 rounded text-xs font-medium hover:bg-red-200 transition-colors mt-1"
+              >
+                Reset (Dev Only)
+              </button>
+            )}
           </div>
         )}
 
-        {/* Feedback Display - Dynamic with column headers */}
+        {/* Feedback Display */}
         <div className="bg-white rounded-lg shadow-sm overflow-hidden">
-          {/* Header with count */}
-          <div className="px-3 py-2 border-b border-gray-100 flex justify-between items-center">
+          {/* Header with gradient */}
+          <div className="px-3 py-2 border-b border-gray-100 flex justify-between items-center bg-gradient-to-r from-orange-100 to-amber-50">
             <span className="text-sm font-medium text-gray-700">Guesses</span>
-            <span className="text-xs text-gray-500">{guessesUsed}/{maxGuesses}</span>
+            <span className="text-xs font-medium bg-orange-200 text-orange-800 px-2 py-0.5 rounded-full">{guessesUsed}/{maxGuesses}</span>
           </div>
 
-          {/* Column headers - serve as legend */}
+          {/* Column headers */}
           <div className="flex items-center px-3 py-2 bg-gray-50 border-b border-gray-200 text-xs font-medium text-gray-500">
             <div className="flex-1">Player</div>
-            <div className="w-10 text-center" title="Played in match">P</div>
-            <div className="w-10 text-center" title="Same Team">T</div>
-            <div className="w-10 text-center" title="Same Role">R</div>
-            <div className="w-10 text-center" title="Is MVP">M</div>
+            <div className="w-8 sm:w-10 text-center" title="Played in match">P</div>
+            <div className="w-8 sm:w-10 text-center" title="Same Team">T</div>
+            <div className="w-8 sm:w-10 text-center" title="Same Role">R</div>
+            <div className="w-8 sm:w-10 text-center" title="Is MVP">M</div>
           </div>
 
-          {/* Feedback rows - newest first */}
+          {/* Feedback rows */}
           {(reversedFeedback.length > 0 || pendingGuess) ? (
             <div className="divide-y divide-gray-100">
-              {/* Pending guess row - shows immediately while waiting for API */}
+              {/* DRS pending guess row */}
               {pendingGuess && (
-                <div className="flex items-center px-3 py-2 bg-amber-50 animate-pulse">
+                <div className="flex items-center px-3 py-2 bg-amber-50 border-l-4 border-amber-400">
                   <div className="flex-1 min-w-0">
                     <div className="font-medium text-gray-900 text-sm truncate">{pendingGuess.fullName}</div>
-                    <div className="text-xs text-gray-500 truncate">{pendingGuess.country}</div>
+                    <div className="text-xs text-amber-600 truncate">DRS Review...</div>
                   </div>
-                  <div className="w-10 flex justify-center"><LoadingDot /></div>
-                  <div className="w-10 flex justify-center"><LoadingDot /></div>
-                  <div className="w-10 flex justify-center"><LoadingDot /></div>
-                  <div className="w-10 flex justify-center"><LoadingDot /></div>
+                  <div className="w-8 sm:w-10 flex justify-center"><DRSCell delay={0} /></div>
+                  <div className="w-8 sm:w-10 flex justify-center"><DRSCell delay={150} /></div>
+                  <div className="w-8 sm:w-10 flex justify-center"><DRSCell delay={300} /></div>
+                  <div className="w-8 sm:w-10 flex justify-center"><DRSCell delay={450} /></div>
                 </div>
               )}
               {reversedFeedback.map((feedback, index) => (
@@ -599,7 +749,7 @@ export const App = () => {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex justify-between items-center mb-4">
-              <h2 className="text-lg font-bold text-gray-900">🏆 Today's Leaderboard</h2>
+              <h2 className="text-lg font-bold text-gray-900">{'\u{1F3C6}'} Today's Leaderboard</h2>
               <button
                 onClick={() => setShowLeaderboard(false)}
                 className="text-gray-400 hover:text-gray-600 p-1"
@@ -620,13 +770,11 @@ export const App = () => {
                 </div>
               ) : leaderboardData && leaderboardData.entries.length > 0 ? (
                 <div className="space-y-1">
-                  {/* Header */}
                   <div className="flex items-center px-2 py-1 text-xs text-gray-500 font-medium border-b">
                     <div className="w-8">#</div>
                     <div className="flex-1">Player</div>
                     <div className="w-16 text-center">Guesses</div>
                   </div>
-                  {/* Entries */}
                   {leaderboardData.entries.map((entry) => (
                     <div
                       key={entry.username}
@@ -637,7 +785,7 @@ export const App = () => {
                       }`}
                     >
                       <div className="w-8 text-sm font-medium text-gray-600">
-                        {entry.rank === 1 ? '🥇' : entry.rank === 2 ? '🥈' : entry.rank === 3 ? '🥉' : entry.rank}
+                        {entry.rank === 1 ? '\u{1F947}' : entry.rank === 2 ? '\u{1F948}' : entry.rank === 3 ? '\u{1F949}' : entry.rank}
                       </div>
                       <div className="flex-1 text-sm text-gray-900 truncate">
                         u/{entry.username}
@@ -675,7 +823,7 @@ export const App = () => {
   );
 };
 
-// Compact Feedback Row Component - flexbox layout matching headers
+// Feedback Row with cricket icons
 function FeedbackRow({ feedback, isNew }: { feedback: GuessFeedback; isNew: boolean }) {
   return (
     <div className={`flex items-center px-3 py-2 ${isNew ? 'bg-amber-100 border-l-4 border-amber-400' : ''}`}>
@@ -683,36 +831,63 @@ function FeedbackRow({ feedback, isNew }: { feedback: GuessFeedback; isNew: bool
         <div className="font-medium text-gray-900 text-sm truncate">{feedback.playerName}</div>
         <div className="text-xs text-gray-500 truncate">{feedback.country}</div>
       </div>
-      <div className="w-10 flex justify-center"><FeedbackIndicator value={feedback.playedInGame} /></div>
-      <div className="w-10 flex justify-center"><FeedbackIndicator value={feedback.sameTeam} /></div>
-      <div className="w-10 flex justify-center"><FeedbackIndicator value={feedback.sameRole} /></div>
-      <div className="w-10 flex justify-center"><FeedbackIndicator value={feedback.isMVP} highlight /></div>
+      <div className="w-8 sm:w-10 flex justify-center"><FeedbackIndicator value={feedback.playedInGame} /></div>
+      <div className="w-8 sm:w-10 flex justify-center"><FeedbackIndicator value={feedback.sameTeam} /></div>
+      <div className="w-8 sm:w-10 flex justify-center"><FeedbackIndicator value={feedback.sameRole} /></div>
+      <div className="w-8 sm:w-10 flex justify-center"><FeedbackIndicator value={feedback.isMVP} highlight /></div>
     </div>
   );
 }
 
-// Compact Feedback Indicator
+// Cricket-themed feedback indicator
 function FeedbackIndicator({ value, highlight = false }: { value: boolean; highlight?: boolean }) {
+  if (value && highlight) {
+    // MVP match - trophy
+    return (
+      <div className="w-8 h-6 rounded bg-amber-300 flex items-center justify-center">
+        <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 text-amber-900" fill="currentColor">
+          <path d="M7 4h10v5a5 5 0 01-10 0V4z" />
+          <path d="M5 4H7V7C5.5 7 4 5.5 5 4zM17 4h2c1 1.5-.5 3-2 3V4z" />
+          <rect x="11" y="14" width="2" height="3" />
+          <rect x="8" y="17" width="8" height="2" rx="1" />
+        </svg>
+      </div>
+    );
+  }
+  if (value) {
+    // Correct - cricket bat
+    return (
+      <div className="w-8 h-6 rounded bg-green-200 flex items-center justify-center">
+        <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 text-green-900" fill="currentColor">
+          <rect x="10" y="2" width="4" height="12" rx="1" />
+          <rect x="11" y="14" width="2" height="6" rx="0.5" />
+          <line x1="9" y1="20" x2="15" y2="20" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        </svg>
+      </div>
+    );
+  }
+  // Incorrect - cricket ball
   return (
-    <div
-      className={`w-8 h-6 rounded flex items-center justify-center text-xs font-bold ${
-        value
-          ? highlight
-            ? 'bg-amber-300 text-amber-900'
-            : 'bg-green-200 text-green-900'
-          : 'bg-red-200 text-red-900'
-      }`}
-    >
-      {value ? '✓' : '✗'}
+    <div className="w-8 h-6 rounded bg-red-200 flex items-center justify-center">
+      <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 text-red-900">
+        <circle cx="12" cy="12" r="10" fill="currentColor" />
+        <path d="M6 6c3 3 3 9 0 12M18 6c-3 3-3 9 0 12" stroke="white" strokeWidth="1.5" fill="none" />
+      </svg>
     </div>
   );
 }
 
-// Loading dot for pending guess
-function LoadingDot() {
+// DRS scanning cell for pending guess
+function DRSCell({ delay = 0 }: { delay?: number }) {
   return (
-    <div className="w-8 h-6 rounded bg-gray-200 flex items-center justify-center">
-      <div className="w-2 h-2 bg-gray-400 rounded-full animate-pulse"></div>
+    <div className="w-8 h-6 rounded bg-amber-100 overflow-hidden relative">
+      <div
+        className="absolute inset-0 bg-gradient-to-r from-transparent via-amber-300/60 to-transparent"
+        style={{
+          animation: 'drs-scan 1.5s ease-in-out infinite',
+          animationDelay: `${delay}ms`
+        }}
+      />
     </div>
   );
 }

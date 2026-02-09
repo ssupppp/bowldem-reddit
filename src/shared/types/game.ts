@@ -5,6 +5,7 @@ export interface Player {
   fullName: string;
   country: string;
   role: 'Batsman' | 'Bowler' | 'All-rounder' | 'Wicketkeeper';
+  active?: boolean;
 }
 
 export interface Scorecard {
@@ -40,6 +41,18 @@ export interface GuessFeedback {
   isMVP: boolean;
 }
 
+export interface MatchSummary {
+  result: string;
+  team1Name: string;
+  team2Name: string;
+  team1Score: string;
+  team2Score: string;
+  mvpName: string;
+  mvpCountry: string;
+  mvpRole: string;
+  cricinfoUrl?: string;
+}
+
 export interface GameState {
   puzzleNumber: number;
   puzzleDate: string;
@@ -66,11 +79,15 @@ export interface InitResponse {
   puzzle: {
     id: number;
     venue: string;
+    team1Name: string;
+    team2Name: string;
     team1Score: string;
     team2Score: string;
   };
   gameState: GameState | null;
   stats: UserStats;
+  feedbackHistory?: GuessFeedback[];
+  matchSummary?: MatchSummary;
 }
 
 export interface GuessRequest {
@@ -82,6 +99,7 @@ export interface GuessResponse {
   feedback: GuessFeedback;
   gameState: GameState;
   stats: UserStats;
+  matchSummary?: MatchSummary;
 }
 
 export interface LeaderboardEntry {

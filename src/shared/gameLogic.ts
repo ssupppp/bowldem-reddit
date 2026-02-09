@@ -12,7 +12,7 @@ export const MAX_GUESSES = 5;
  */
 export function getTodayUTC(): string {
   const dateStr = new Date().toISOString().split('T')[0];
-  return dateStr ?? '2026-01-31'; // Fallback should never happen
+  return dateStr ?? '2026-01-31';
 }
 
 /**

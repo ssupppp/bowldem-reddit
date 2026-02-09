@@ -1,27 +1,13 @@
 # Devvit Platform Bugs & Issues
 
-**Last Updated:** Jan 31, 2026
+**Last Updated:** Feb 7, 2026
 
 ---
 
-## Resume Instructions
+## BUG-001: submitCustomPost ValidationErrors (RESOLVED)
 
-After restarting Claude Code with Devvit MCP connected, say:
-
-> "Continue debugging the submitCustomPost bug. Devvit MCP should now be connected. Check the todo folder for context."
-
-Claude will:
-1. Read these bug notes
-2. Use Devvit MCP to search documentation
-3. Look for known issues or alternative approaches
-
----
-
-## BUG-001: submitCustomPost ValidationErrors (BLOCKING)
-
-**Status:** Unresolved
-**Severity:** Critical
-**Affected:** Devvit Web apps using menu actions
+**Status:** ✅ Resolved (v0.0.12)
+**Severity:** Was Critical
 
 ### Description
 `reddit.submitCustomPost()` fails with obfuscated ValidationErrors when called from a Devvit Web server endpoint.
